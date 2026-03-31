@@ -126,7 +126,7 @@
   </div>
 
   <script>
-    const API = 'http://localhost:5000/api';
+    const API = 'http://localhost:5001/api';
 
     // ─── Home Page ────────────────────────────────────────
     const HomePage = {
@@ -215,11 +215,33 @@
             if (mediaType === 'video') { fd.append('crf', this.crf); if (this.resolution) fd.append('resolution', this.resolution); }
             try {
               const resp = await axios.post(API + endpoint, fd);
-              this.result = resp.data;
+              const task = resp.data;
+              if (task.status === 'processing') {
+                this.result = task;
+                await this.pollTask(task.id);
+              } else {
+                this.result = task;
+              }
             } catch(e) {
               this.error = e.response?.data?.error || e.message;
             }
             this.processing = false;
+          },
+          async pollTask(taskId) {
+            const maxAttempts = 600;
+            for (let i = 0; i < maxAttempts; i++) {
+              await new Promise(r => setTimeout(r, 1500));
+              try {
+                const resp = await axios.get(API + '/tasks/' + taskId);
+                this.result = resp.data;
+                if (resp.data.status === 'completed') return;
+                if (resp.data.status === 'failed') {
+                  this.error = resp.data.errorMessage || '处理失败';
+                  return;
+                }
+              } catch(e) { /* retry */ }
+            }
+            this.error = '处理超时，请在历史记录中查看结果';
           },
           download() {
             if (this.result) window.open(API.replace('/api','') + '/api/download/' + this.result.id);
@@ -260,7 +282,11 @@
               <span v-if="processing" class="spinner"></span>
               {{ processing ? '处理中...' : '开始处理' }}
             </button>
-            <div v-if="result" class="result success">
+            <div v-if="result && result.status === 'processing'" class="result" style="background:#eff6ff;border-left:4px solid #2563eb;">
+              <div class="result-row"><span class="result-label">状态</span><span class="result-value">⏳ 处理中...</span></div>
+              <div class="result-row"><span class="result-label">原始大小</span><span class="result-value">{{ formatSize(result.fileSizeBefore) }}</span></div>
+            </div>
+            <div v-if="result && result.status === 'completed'" class="result success">
               <div class="result-row"><span class="result-label">状态</span><span class="result-value">✅ 处理完成</span></div>
               <div class="result-row"><span class="result-label">原始大小</span><span class="result-value">{{ formatSize(result.fileSizeBefore) }}</span></div>
               <div class="result-row"><span class="result-label">处理后大小</span><span class="result-value">{{ formatSize(result.fileSizeAfter) }}</span></div>
@@ -313,7 +339,11 @@
               <span v-if="processing" class="spinner"></span>
               {{ processing ? '处理中...' : '开始处理' }}
             </button>
-            <div v-if="result" class="result success">
+            <div v-if="result && result.status === 'processing'" class="result" style="background:#eff6ff;border-left:4px solid #2563eb;">
+              <div class="result-row"><span class="result-label">状态</span><span class="result-value">⏳ 处理中...</span></div>
+              <div class="result-row"><span class="result-label">原始大小</span><span class="result-value">{{ formatSize(result.fileSizeBefore) }}</span></div>
+            </div>
+            <div v-if="result && result.status === 'completed'" class="result success">
               <div class="result-row"><span class="result-label">状态</span><span class="result-value">✅ 处理完成</span></div>
               <div class="result-row"><span class="result-label">原始大小</span><span class="result-value">{{ formatSize(result.fileSizeBefore) }}</span></div>
               <div class="result-row"><span class="result-label">处理后大小</span><span class="result-value">{{ formatSize(result.fileSizeAfter) }}</span></div>
@@ -365,7 +395,11 @@
               <span v-if="processing" class="spinner"></span>
               {{ processing ? '处理中...' : '开始处理' }}
             </button>
-            <div v-if="result" class="result success">
+            <div v-if="result && result.status === 'processing'" class="result" style="background:#eff6ff;border-left:4px solid #2563eb;">
+              <div class="result-row"><span class="result-label">状态</span><span class="result-value">⏳ 处理中...</span></div>
+              <div class="result-row"><span class="result-label">原始大小</span><span class="result-value">{{ formatSize(result.fileSizeBefore) }}</span></div>
+            </div>
+            <div v-if="result && result.status === 'completed'" class="result success">
               <div class="result-row"><span class="result-label">状态</span><span class="result-value">✅ 处理完成</span></div>
               <div class="result-row"><span class="result-label">原始大小</span><span class="result-value">{{ formatSize(result.fileSizeBefore) }}</span></div>
               <div class="result-row"><span class="result-label">处理后大小</span><span class="result-value">{{ formatSize(result.fileSizeAfter) }}</span></div>
