@@ -62,7 +62,8 @@ After scaffolding, help the user customize:
 
 Tell the user to open a Copilot chat and say:
 
-> 请读取 `AGENTS.md` 和 `MEMORY.md`，恢复你的身份和工作状态，然后开始工作。
+> Read `AGENTS.md` and `MEMORY.md`, restore your identity and working state,
+> then start working.
 
 ---
 
