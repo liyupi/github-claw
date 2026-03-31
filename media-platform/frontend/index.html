@@ -215,7 +215,26 @@
             if (mediaType === 'video') { fd.append('crf', this.crf); if (this.resolution) fd.append('resolution', this.resolution); }
             try {
               const resp = await axios.post(API + endpoint, fd);
-              this.result = resp.data;
+              let task = resp.data;
+              const MAX_POLLS = 300;
+              let polls = 0;
+              while (task.status === 'processing' && polls < MAX_POLLS) {
+                await new Promise(r => setTimeout(r, 2000));
+                try {
+                  const poll = await axios.get(API + '/tasks/' + task.id);
+                  task = poll.data;
+                } catch(pollErr) {
+                  console.warn('Polling error, retrying...', pollErr);
+                }
+                polls++;
+              }
+              if (task.status === 'processing') {
+                this.error = '处理超时，请稍后在历史记录中查看结果';
+              } else if (task.status === 'failed') {
+                this.error = task.errorMessage || '处理失败';
+              } else {
+                this.result = task;
+              }
             } catch(e) {
               this.error = e.response?.data?.error || e.message;
             }
