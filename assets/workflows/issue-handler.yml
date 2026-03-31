@@ -1,0 +1,104 @@
+name: Issue Auto Handler
+
+on:
+  issues:
+    types: [opened, labeled]
+
+permissions:
+  issues: write
+
+jobs:
+  # Job 1: Auto-reply when a new issue is opened
+  auto-reply:
+    if: github.event.action == 'opened'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post welcome comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = context.issue.number;
+            const author = context.payload.issue.user.login;
+
+            const body = [
+              `👋 Hi @${author}, thanks for opening this issue!`,
+              '',
+              'We have received your feedback and will review it as soon as possible. In the meantime, please make sure to include:',
+              '',
+              '- **Environment**: OS, browser version, relevant tool versions',
+              '- **Steps to reproduce**: How to reliably trigger the issue',
+              '- **Expected vs actual behavior**: What you expected vs what happened',
+              '',
+              'If this is a feature request, please describe your use case and expected outcome.',
+              '',
+              '> 🤖 This reply was generated automatically.'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: body
+            });
+
+  # Job 2: Assign to Copilot coding agent when bug label is added
+  assign-copilot-on-bug:
+    if: github.event.action == 'labeled' && github.event.label.name == 'bug'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assign issue to Copilot coding agent
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.COPILOT_ASSIGN_TOKEN }}
+          script: |
+            const issueNumber = context.issue.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const baseBranch = context.payload.repository.default_branch;
+
+            console.log(`Bug label added to issue #${issueNumber}, assigning to Copilot coding agent...`);
+
+            try {
+              const response = await github.request(
+                'POST /repos/{owner}/{repo}/issues/{issue_number}/assignees',
+                {
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  assignees: ['copilot-swe-agent[bot]'],
+                  agent_assignment: {
+                    target_repo: `${owner}/${repo}`,
+                    base_branch: baseBranch,
+                    custom_instructions: '',
+                    custom_agent: '',
+                    model: ''
+                  }
+                }
+              );
+
+              const assignees = (response.data.assignees || []).map(a => String(a.login || a.name || '').trim());
+              const assigned = assignees.some(a => a.toLowerCase().includes('copilot'));
+
+              if (!assigned) {
+                throw new Error(`Copilot coding agent was not found in assignees. Current assignees: ${assignees.join(', ') || '(none)'}`);
+              }
+
+              console.log('Successfully assigned to Copilot coding agent.');
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body: '🐛 Bug identified and assigned to Copilot coding agent. Copilot will analyze the issue and attempt to create a fix PR.\n\n> 🤖 This reply was generated automatically.'
+              });
+            } catch (error) {
+              const errMsg = String(error.message).replace(/[`$\\]/g, '');
+              console.error(`Failed to assign Copilot coding agent: ${errMsg}`);
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issueNumber,
+                body: `⚠️ Failed to assign this issue to Copilot coding agent:\n\n\`${errMsg}\`\n\nPlease verify that Copilot coding agent is enabled for this repository and that the repository policy allows API-based assignment.\n\n> 🤖 This reply was generated automatically.`
+              });
+            }

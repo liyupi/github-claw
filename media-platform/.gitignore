@@ -1,7 +1,0 @@
-__pycache__/
-*.pyc
-*.db
-backend/uploads/*
-backend/outputs/*
-!backend/uploads/.gitkeep
-!backend/outputs/.gitkeep
