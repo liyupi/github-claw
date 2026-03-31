@@ -215,7 +215,17 @@
             if (mediaType === 'video') { fd.append('crf', this.crf); if (this.resolution) fd.append('resolution', this.resolution); }
             try {
               const resp = await axios.post(API + endpoint, fd);
-              this.result = resp.data;
+              let task = resp.data;
+              while (task.status === 'processing') {
+                await new Promise(r => setTimeout(r, 1000));
+                const poll = await axios.get(API + '/tasks/' + task.id);
+                task = poll.data;
+              }
+              if (task.status === 'failed') {
+                this.error = task.errorMessage || '处理失败';
+              } else {
+                this.result = task;
+              }
             } catch(e) {
               this.error = e.response?.data?.error || e.message;
             }
