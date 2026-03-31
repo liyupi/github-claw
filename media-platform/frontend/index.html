@@ -161,6 +161,8 @@
     };
 
     // ─── Shared upload mixin-like composable ──────────────
+    const POLL_INTERVAL_MS = 1000;
+
     function useMediaProcessor(mediaType, endpoint) {
       return {
         data() {
@@ -217,7 +219,7 @@
               const resp = await axios.post(API + endpoint, fd);
               let task = resp.data;
               while (task.status === 'processing') {
-                await new Promise(r => setTimeout(r, 1000));
+                await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
                 const poll = await axios.get(API + '/tasks/' + task.id);
                 task = poll.data;
               }

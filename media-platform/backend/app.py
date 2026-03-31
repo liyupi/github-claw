@@ -173,7 +173,6 @@ def process_image_route():
     thread = threading.Thread(
         target=_process_in_background,
         args=(task_id, process_image, input_path, output_format, quality, operation),
-        daemon=True,
     )
     thread.start()
 
@@ -199,7 +198,6 @@ def process_audio_route():
     thread = threading.Thread(
         target=_process_in_background,
         args=(task_id, process_audio, input_path, output_format, bitrate, operation),
-        daemon=True,
     )
     thread.start()
 
@@ -226,7 +224,6 @@ def process_video_route():
     thread = threading.Thread(
         target=_process_in_background,
         args=(task_id, process_video, input_path, output_format, crf, resolution or None, operation),
-        daemon=True,
     )
     thread.start()
 
