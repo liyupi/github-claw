@@ -2,6 +2,8 @@
 
 import os
 import datetime
+import logging
+import threading
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -157,6 +159,16 @@ def process_image_route():
     return jsonify(_task_to_dict(row))
 
 
+def _run_in_background(fn, task_id, *args):
+    """Run a processing function in a background thread, updating task status."""
+    try:
+        output_path = fn(*args)
+        _complete_task(task_id, output_path)
+    except Exception as e:
+        logging.exception("Background task %s failed: %s", task_id, e)
+        _fail_task(task_id, e)
+
+
 @app.route("/api/process/audio", methods=["POST"])
 def process_audio_route():
     if "file" not in request.files:
@@ -173,17 +185,17 @@ def process_audio_route():
     input_path, filename = _save_upload(file)
     task_id = _create_task(filename, "audio", operation, input_path, output_format)
 
-    try:
-        output_path = process_audio(input_path, output_format, bitrate, operation)
-        _complete_task(task_id, output_path)
-    except Exception as e:
-        _fail_task(task_id, e)
-        return jsonify({"error": str(e)}), 500
+    t = threading.Thread(
+        target=_run_in_background,
+        args=(process_audio, task_id, input_path, output_format, bitrate, operation),
+        daemon=True,
+    )
+    t.start()
 
     conn = get_db()
     row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
     conn.close()
-    return jsonify(_task_to_dict(row))
+    return jsonify(_task_to_dict(row)), 202
 
 
 @app.route("/api/process/video", methods=["POST"])
@@ -203,17 +215,17 @@ def process_video_route():
     input_path, filename = _save_upload(file)
     task_id = _create_task(filename, "video", operation, input_path, output_format, crf)
 
-    try:
-        output_path = process_video(input_path, output_format, crf, resolution or None, operation)
-        _complete_task(task_id, output_path)
-    except Exception as e:
-        _fail_task(task_id, e)
-        return jsonify({"error": str(e)}), 500
+    t = threading.Thread(
+        target=_run_in_background,
+        args=(process_video, task_id, input_path, output_format, crf, resolution or None, operation),
+        daemon=True,
+    )
+    t.start()
 
     conn = get_db()
     row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
     conn.close()
-    return jsonify(_task_to_dict(row))
+    return jsonify(_task_to_dict(row)), 202
 
 
 @app.route("/api/download/<int:task_id>", methods=["GET"])
@@ -231,4 +243,4 @@ def download(task_id):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, threaded=True)
