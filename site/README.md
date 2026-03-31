@@ -1,6 +1,6 @@
 # AI Guide 导航网站
 
-> 一个为 **AI Guide（鱼皮的 AI 知识库）** 打造的高颜值导航与宣传站点，帮助用户快速理解项目价值、学习路径与核心内容版块
+> 一个为 **AI Guide（鱼皮的 AI 知识库）** 打造的高颜值导航与宣传站点，帮助用户快速理解项目价值、学习路径与核心内容版块。
 
 <p align="center">
   <a href="https://ai.codefather.cn" target="_blank" rel="noopener noreferrer"><img alt="在线阅读" src="https://img.shields.io/badge/在线阅读-ai.codefather.cn-6366f1?style=for-the-badge"></a>
