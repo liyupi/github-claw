@@ -215,7 +215,30 @@
             if (mediaType === 'video') { fd.append('crf', this.crf); if (this.resolution) fd.append('resolution', this.resolution); }
             try {
               const resp = await axios.post(API + endpoint, fd);
-              this.result = resp.data;
+              if (resp.status === 202) {
+                // Background processing: poll every 2s, up to 10 minutes
+                const taskId = resp.data.id;
+                let polls = 0;
+                const maxPolls = 300; // 300 × 2s = 10 min timeout
+                while (polls < maxPolls) {
+                  await new Promise(r => setTimeout(r, 2000));
+                  polls++;
+                  const taskResp = await axios.get(API + '/tasks/' + taskId);
+                  if (taskResp.data.status !== 'processing') {
+                    if (taskResp.data.status === 'completed') {
+                      this.result = taskResp.data;
+                    } else {
+                      this.error = taskResp.data.errorMessage || '处理失败';
+                    }
+                    break;
+                  }
+                }
+                if (polls >= maxPolls) {
+                  this.error = '处理超时，请稍后在处理记录中查看结果';
+                }
+              } else {
+                this.result = resp.data;
+              }
             } catch(e) {
               this.error = e.response?.data?.error || e.message;
             }
