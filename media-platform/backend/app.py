@@ -2,6 +2,7 @@
 
 import os
 import datetime
+import threading
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -42,39 +43,45 @@ def _save_upload(file_storage):
 def _create_task(filename, media_type, operation, input_path, output_format, quality=None):
     """Insert a new task row and return its id."""
     conn = get_db()
-    file_size = os.path.getsize(input_path)
-    cur = conn.execute(
-        """INSERT INTO tasks
-           (filename, media_type, operation, status, input_path, output_format, quality, file_size_before)
-           VALUES (?, ?, ?, 'processing', ?, ?, ?, ?)""",
-        (filename, media_type, operation, input_path, output_format, quality, file_size),
-    )
-    conn.commit()
-    task_id = cur.lastrowid
-    conn.close()
+    try:
+        file_size = os.path.getsize(input_path)
+        cur = conn.execute(
+            """INSERT INTO tasks
+               (filename, media_type, operation, status, input_path, output_format, quality, file_size_before)
+               VALUES (?, ?, ?, 'processing', ?, ?, ?, ?)""",
+            (filename, media_type, operation, input_path, output_format, quality, file_size),
+        )
+        conn.commit()
+        task_id = cur.lastrowid
+    finally:
+        conn.close()
     return task_id
 
 
 def _complete_task(task_id, output_path):
     conn = get_db()
-    file_size = os.path.getsize(output_path)
-    conn.execute(
-        """UPDATE tasks SET status='completed', output_path=?, file_size_after=?,
-           completed_at=CURRENT_TIMESTAMP WHERE id=?""",
-        (output_path, file_size, task_id),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        file_size = os.path.getsize(output_path)
+        conn.execute(
+            """UPDATE tasks SET status='completed', output_path=?, file_size_after=?,
+               completed_at=CURRENT_TIMESTAMP WHERE id=?""",
+            (output_path, file_size, task_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _fail_task(task_id, error_msg):
     conn = get_db()
-    conn.execute(
-        "UPDATE tasks SET status='failed', error_message=? WHERE id=?",
-        (str(error_msg)[:MAX_ERROR_LENGTH], task_id),
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(
+            "UPDATE tasks SET status='failed', error_message=? WHERE id=?",
+            (str(error_msg)[:MAX_ERROR_LENGTH], task_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _task_to_dict(row):
@@ -92,6 +99,25 @@ def _task_to_dict(row):
         "completedAt": row["completed_at"],
         "errorMessage": row["error_message"],
     }
+
+
+def _process_in_background(task_id, process_fn, *args):
+    """Run a processing function in a background thread."""
+    try:
+        output_path = process_fn(*args)
+        _complete_task(task_id, output_path)
+    except Exception as e:
+        _fail_task(task_id, e)
+
+
+def _get_task_dict(task_id):
+    """Fetch a task row and return it as a dict."""
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    finally:
+        conn.close()
+    return _task_to_dict(row) if row else None
 
 
 # ─── Routes ───────────────────────────────────────────────────────
@@ -113,19 +139,19 @@ def formats():
 @app.route("/api/tasks", methods=["GET"])
 def list_tasks():
     conn = get_db()
-    rows = conn.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT 100").fetchall()
-    conn.close()
+    try:
+        rows = conn.execute("SELECT * FROM tasks ORDER BY id DESC LIMIT 100").fetchall()
+    finally:
+        conn.close()
     return jsonify([_task_to_dict(r) for r in rows])
 
 
 @app.route("/api/tasks/<int:task_id>", methods=["GET"])
 def get_task(task_id):
-    conn = get_db()
-    row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    conn.close()
-    if not row:
+    task = _get_task_dict(task_id)
+    if not task:
         return jsonify({"error": "Task not found"}), 404
-    return jsonify(_task_to_dict(row))
+    return jsonify(task)
 
 
 @app.route("/api/process/image", methods=["POST"])
@@ -144,17 +170,13 @@ def process_image_route():
     input_path, filename = _save_upload(file)
     task_id = _create_task(filename, "image", operation, input_path, output_format, quality)
 
-    try:
-        output_path = process_image(input_path, output_format, quality, operation)
-        _complete_task(task_id, output_path)
-    except Exception as e:
-        _fail_task(task_id, e)
-        return jsonify({"error": str(e)}), 500
+    thread = threading.Thread(
+        target=_process_in_background,
+        args=(task_id, process_image, input_path, output_format, quality, operation),
+    )
+    thread.start()
 
-    conn = get_db()
-    row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    conn.close()
-    return jsonify(_task_to_dict(row))
+    return jsonify(_get_task_dict(task_id)), 202
 
 
 @app.route("/api/process/audio", methods=["POST"])
@@ -173,17 +195,13 @@ def process_audio_route():
     input_path, filename = _save_upload(file)
     task_id = _create_task(filename, "audio", operation, input_path, output_format)
 
-    try:
-        output_path = process_audio(input_path, output_format, bitrate, operation)
-        _complete_task(task_id, output_path)
-    except Exception as e:
-        _fail_task(task_id, e)
-        return jsonify({"error": str(e)}), 500
+    thread = threading.Thread(
+        target=_process_in_background,
+        args=(task_id, process_audio, input_path, output_format, bitrate, operation),
+    )
+    thread.start()
 
-    conn = get_db()
-    row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    conn.close()
-    return jsonify(_task_to_dict(row))
+    return jsonify(_get_task_dict(task_id)), 202
 
 
 @app.route("/api/process/video", methods=["POST"])
@@ -203,24 +221,22 @@ def process_video_route():
     input_path, filename = _save_upload(file)
     task_id = _create_task(filename, "video", operation, input_path, output_format, crf)
 
-    try:
-        output_path = process_video(input_path, output_format, crf, resolution or None, operation)
-        _complete_task(task_id, output_path)
-    except Exception as e:
-        _fail_task(task_id, e)
-        return jsonify({"error": str(e)}), 500
+    thread = threading.Thread(
+        target=_process_in_background,
+        args=(task_id, process_video, input_path, output_format, crf, resolution or None, operation),
+    )
+    thread.start()
 
-    conn = get_db()
-    row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    conn.close()
-    return jsonify(_task_to_dict(row))
+    return jsonify(_get_task_dict(task_id)), 202
 
 
 @app.route("/api/download/<int:task_id>", methods=["GET"])
 def download(task_id):
     conn = get_db()
-    row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-    conn.close()
+    try:
+        row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    finally:
+        conn.close()
     if not row:
         return jsonify({"error": "Task not found"}), 404
     if row["status"] != "completed":
@@ -231,4 +247,4 @@ def download(task_id):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, threaded=True)
